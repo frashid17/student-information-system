@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'Add Books';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff', 'faculty']);
+requireModuleAccess('library');
 
 $pdo = getDBConnection();
 $campuses = $pdo->query("SELECT * FROM campus_branches WHERE is_active = 1")->fetchAll();
