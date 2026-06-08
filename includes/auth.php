@@ -96,10 +96,31 @@ function canAccess(string $module): bool
     $permissions = [
         'super_admin' => ['dashboard', 'students', 'fees', 'fees_manage', 'faculty', 'library', 'institution', 'units', 'academics', 'reports', 'communications', 'settings', 'users', 'password_resets'],
         'admin' => ['dashboard', 'students', 'fees', 'fees_manage', 'faculty', 'library', 'institution', 'units', 'academics', 'reports', 'communications', 'users', 'password_resets'],
-        'staff' => ['dashboard', 'students', 'fees', 'fees_manage', 'library', 'academics', 'reports', 'communications'],
-        'faculty' => ['dashboard', 'library', 'academics', 'communications'],
+        'staff' => ['dashboard', 'students_scoped', 'academics_teaching', 'timetable', 'payslip_own', 'communications'],
+        'faculty' => ['dashboard', 'students_scoped', 'academics_teaching', 'timetable', 'payslip_own', 'communications'],
         'student' => ['dashboard', 'fees_balance', 'library_student', 'academics_view', 'unit_registration', 'exam_card', 'semester_reporting', 'communications'],
     ];
 
     return in_array($module, $permissions[$role] ?? [], true);
+}
+
+function requireModuleAccess(string $module): void
+{
+    requireLogin();
+    if (!canAccess($module)) {
+        setFlash('error', 'You do not have permission to access this page.');
+        redirect(BASE_URL . '/dashboard.php');
+    }
+}
+
+function requireAnyModuleAccess(array $modules): void
+{
+    requireLogin();
+    foreach ($modules as $module) {
+        if (canAccess($module)) {
+            return;
+        }
+    }
+    setFlash('error', 'You do not have permission to access this page.');
+    redirect(BASE_URL . '/dashboard.php');
 }
