@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'View Students';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff']);
+requireRole(['super_admin', 'admin']);
 
 $pdo = getDBConnection();
 
@@ -42,6 +42,12 @@ if (isset($_GET['view']) && is_numeric($_GET['view'])) {
             $viewStudent['academic_year']
         );
         $viewStudentFee = getStudentFeeBalance(
+            $pdo,
+            (int) $viewStudent['id'],
+            $viewStudent['trimester'],
+            $viewStudent['academic_year']
+        );
+        $viewStudentLecturers = getLecturersForStudentRegisteredUnits(
             $pdo,
             (int) $viewStudent['id'],
             $viewStudent['trimester'],
@@ -102,13 +108,16 @@ require_once __DIR__ . '/../../includes/header.php';
         </div>
 
         <div class="form-section-title">Registered Units (<?= count($viewStudentUnits) ?> / <?= MAX_UNITS_PER_SEMESTER ?>)</div>
+        <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:12px;">
+            Lecturers are linked automatically when they are assigned to a unit and the student registers for it.
+        </p>
         <?php if (empty($viewStudentUnits)): ?>
         <p style="color:var(--text-muted);margin-bottom:16px;">No units registered for the current semester.</p>
         <?php else: ?>
         <div class="table-responsive" style="margin-bottom:16px;">
             <table class="data-table">
                 <thead>
-                    <tr><th>Code</th><th>Unit Name</th><th>Credits</th><th>Category</th><th>Registered</th></tr>
+                    <tr><th>Code</th><th>Unit Name</th><th>Credits</th><th>Category</th><th>Assigned Lecturer</th><th>Registered</th></tr>
                 </thead>
                 <tbody>
                     <?php foreach ($viewStudentUnits as $u): ?>
@@ -117,6 +126,13 @@ require_once __DIR__ . '/../../includes/header.php';
                         <td><?= sanitize($u['unit_name']) ?></td>
                         <td><?= sanitize((string) $u['credit_hours']) ?></td>
                         <td><?= sanitize($u['category']) ?></td>
+                        <td>
+                            <?php if (!empty($viewStudentLecturers[(int) $u['unit_id']])): ?>
+                            <?= sanitize($viewStudentLecturers[(int) $u['unit_id']]) ?>
+                            <?php else: ?>
+                            <span style="color:var(--text-muted);">No lecturer assigned to this unit</span>
+                            <?php endif; ?>
+                        </td>
                         <td><?= formatDate($u['registered_at']) ?></td>
                     </tr>
                     <?php endforeach; ?>
