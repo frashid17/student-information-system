@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'Library Check-in';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff', 'faculty', 'student']);
+requireModuleAccess('library');
 
 $pdo = getDBConnection();
 $students = $pdo->query("SELECT id, student_number, first_name, last_name FROM students WHERE status = 'active' ORDER BY first_name")->fetchAll();
