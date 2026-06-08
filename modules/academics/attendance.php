@@ -1,14 +1,46 @@
 <?php
 $pageTitle = 'Attendance';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff', 'faculty']);
+requireAnyModuleAccess(['academics', 'academics_teaching']);
 
 $pdo = getDBConnection();
-$students = $pdo->query("SELECT id, student_number, first_name, last_name FROM students WHERE status = 'active' ORDER BY first_name")->fetchAll();
+$allStudents = $pdo->query("SELECT id, student_number, first_name, last_name FROM students WHERE status = 'active' ORDER BY first_name")->fetchAll();
+$students = $allStudents;
+$teachingFacultyId = null;
+$teachingTerm = null;
+
+if (isTeachingUser() && !isAdminRole()) {
+    $teachingFacultyId = getTeachingFacultyId($pdo);
+    if ($teachingFacultyId) {
+        $teachingTerm = getCurrentTeachingTerm($pdo, $teachingFacultyId);
+        $students = getStudentsForTeacherUnits($pdo, $teachingFacultyId, $teachingTerm['trimester'], $teachingTerm['academic_year']);
+    } else {
+        $students = [];
+    }
+}
+
+$assignedUnits = [];
+if ($teachingFacultyId) {
+    $assignedUnits = getAssignedUnitsForTeacher($pdo, $teachingFacultyId, $teachingTerm['trimester'], $teachingTerm['academic_year']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isTeachingUser() && !isAdminRole()) {
+        if (!$teachingFacultyId) {
+            setFlash('error', 'Your teaching profile is not linked.');
+            redirect(BASE_URL . '/modules/academics/attendance.php');
+        }
+    }
+
     if (isset($_POST['bulk_attendance'])) {
         foreach ($_POST['attendance'] as $studentId => $status) {
+            $studentId = (int) $studentId;
+            if (isTeachingUser() && !isAdminRole()) {
+                if (!teacherCanAccessStudent($pdo, $teachingFacultyId, $studentId, $teachingTerm['trimester'], $teachingTerm['academic_year'])) {
+                    continue;
+                }
+            }
+
             $check = $pdo->prepare("SELECT id FROM attendance WHERE student_id = ? AND attendance_date = ? AND course_name = ?");
             $check->execute([$studentId, $_POST['attendance_date'], $_POST['course_name']]);
 
@@ -22,9 +54,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         setFlash('success', 'Attendance recorded for all students.');
     } else {
+        $studentId = (int) $_POST['student_id'];
+        if (isTeachingUser() && !isAdminRole()) {
+            if (!teacherCanAccessStudent($pdo, $teachingFacultyId, $studentId, $teachingTerm['trimester'], $teachingTerm['academic_year'])) {
+                setFlash('error', 'You can only record attendance for students in your assigned units.');
+                redirect(BASE_URL . '/modules/academics/attendance.php');
+            }
+        }
+
         $stmt = $pdo->prepare("INSERT INTO attendance (student_id, course_name, attendance_date, status, recorded_by) VALUES (?, ?, ?, ?, ?)");
         $stmt->execute([
-            $_POST['student_id'], trim($_POST['course_name']),
+            $studentId, trim($_POST['course_name']),
             $_POST['attendance_date'], $_POST['status'], $_SESSION['user_id']
         ]);
         setFlash('success', 'Attendance recorded.');
@@ -35,23 +75,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $reportStudent = null;
 $reportAttendance = [];
 if (isset($_GET['report']) && is_numeric($_GET['report'])) {
-    $stmt = $pdo->prepare("SELECT * FROM students WHERE id = ?");
-    $stmt->execute([$_GET['report']]);
-    $reportStudent = $stmt->fetch();
+    $reportId = (int) $_GET['report'];
+    if (isTeachingUser() && !isAdminRole()) {
+        if ($teachingFacultyId && teacherCanAccessStudent($pdo, $teachingFacultyId, $reportId, $teachingTerm['trimester'], $teachingTerm['academic_year'])) {
+            $stmt = $pdo->prepare("SELECT * FROM students WHERE id = ?");
+            $stmt->execute([$reportId]);
+            $reportStudent = $stmt->fetch();
+        }
+    } else {
+        $stmt = $pdo->prepare("SELECT * FROM students WHERE id = ?");
+        $stmt->execute([$reportId]);
+        $reportStudent = $stmt->fetch();
+    }
 
     if ($reportStudent) {
         $aStmt = $pdo->prepare("SELECT * FROM attendance WHERE student_id = ? ORDER BY attendance_date DESC");
-        $aStmt->execute([$_GET['report']]);
+        $aStmt->execute([$reportId]);
         $reportAttendance = $aStmt->fetchAll();
     }
 }
 
-$recent = $pdo->query("
-    SELECT a.*, s.student_number, s.first_name, s.last_name
-    FROM attendance a
-    JOIN students s ON a.student_id = s.id
-    ORDER BY a.attendance_date DESC, a.created_at DESC LIMIT 50
-")->fetchAll();
+if (isTeachingUser() && !isAdminRole() && $teachingFacultyId) {
+    $allowedIds = array_column($students, 'id');
+    if (empty($allowedIds)) {
+        $recent = [];
+    } else {
+        $placeholders = implode(',', array_fill(0, count($allowedIds), '?'));
+        $stmt = $pdo->prepare("
+            SELECT a.*, s.student_number, s.first_name, s.last_name
+            FROM attendance a
+            JOIN students s ON a.student_id = s.id
+            WHERE a.student_id IN ($placeholders)
+            ORDER BY a.attendance_date DESC, a.created_at DESC LIMIT 50
+        ");
+        $stmt->execute($allowedIds);
+        $recent = $stmt->fetchAll();
+    }
+} else {
+    $recent = $pdo->query("
+        SELECT a.*, s.student_number, s.first_name, s.last_name
+        FROM attendance a
+        JOIN students s ON a.student_id = s.id
+        ORDER BY a.attendance_date DESC, a.created_at DESC LIMIT 50
+    ")->fetchAll();
+}
 
 $flash = getFlash();
 
@@ -104,8 +171,18 @@ require_once __DIR__ . '/../../includes/header.php';
             <input type="hidden" name="bulk_attendance" value="1">
             <div class="form-row">
                 <div class="form-group">
-                    <label>Course Name *</label>
-                    <input type="text" name="course_name" class="form-control" required>
+                    <label>Course / Unit *</label>
+                    <?php if (!empty($assignedUnits)): ?>
+                    <select name="course_name" class="form-control" required>
+                        <?php foreach ($assignedUnits as $u): ?>
+                        <option value="<?= sanitize($u['unit_code'] . ' — ' . $u['unit_name']) ?>">
+                            <?= sanitize($u['unit_code'] . ' — ' . $u['unit_name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php else: ?>
+                    <input type="text" name="course_name" class="form-control" required placeholder="Course or unit name">
+                    <?php endif; ?>
                 </div>
                 <div class="form-group">
                     <label>Date *</label>
