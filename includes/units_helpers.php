@@ -29,8 +29,8 @@ function getFeePaymentPercent(PDO $pdo, int $studentId, string $trimester, strin
     $balance = getStudentFeeBalance($pdo, $studentId, $trimester, $academicYear);
     $totalFee = (float) $balance['total_fee'];
 
-    if ($totalFee <= 0) {
-        return 100.0;
+    if (empty($balance['fee_configured']) || $totalFee <= 0) {
+        return 0.0;
     }
 
     return min(100.0, ((float) $balance['total_paid'] / $totalFee) * 100);
@@ -125,10 +125,78 @@ function getStudentRegisteredUnits(PDO $pdo, int $studentId, string $trimester, 
     return $stmt->fetchAll();
 }
 
+function completeStudentRegistrationsForTerm(PDO $pdo, int $studentId, string $trimester, string $academicYear): int
+{
+    if (!tableExists($pdo, 'student_unit_registrations')) {
+        return 0;
+    }
+
+    $stmt = $pdo->prepare("
+        UPDATE student_unit_registrations
+        SET status = 'completed'
+        WHERE student_id = ? AND trimester = ? AND academic_year = ? AND status = 'registered'
+    ");
+    $stmt->execute([$studentId, $trimester, $academicYear]);
+
+    return $stmt->rowCount();
+}
+
+function closeStaleStudentRegistrations(PDO $pdo, array $student): int
+{
+    if (!tableExists($pdo, 'student_unit_registrations')) {
+        return 0;
+    }
+
+    $stmt = $pdo->prepare("
+        UPDATE student_unit_registrations
+        SET status = 'completed'
+        WHERE student_id = ? AND status = 'registered'
+          AND (trimester != ? OR academic_year != ?)
+    ");
+    $stmt->execute([
+        (int) $student['id'],
+        $student['trimester'],
+        $student['academic_year'],
+    ]);
+
+    return $stmt->rowCount();
+}
+
+function getCompletedUnitIdsForStudent(PDO $pdo, int $studentId): array
+{
+    if (!tableExists($pdo, 'student_unit_registrations')) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT unit_id
+        FROM student_unit_registrations
+        WHERE student_id = ? AND status = 'completed'
+    ");
+    $stmt->execute([$studentId]);
+
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
 function getAvailableUnitsForStudent(PDO $pdo, array $student): array
 {
     if (!tableExists($pdo, 'program_units') || empty($student['program_id'])) {
         return [];
+    }
+
+    $completedUnitIds = getCompletedUnitIdsForStudent($pdo, (int) $student['id']);
+    $excludeClause = '';
+    $params = [
+        (int) $student['program_id'],
+        (int) $student['id'],
+        $student['trimester'],
+        $student['academic_year'],
+    ];
+
+    if (!empty($completedUnitIds)) {
+        $placeholders = implode(',', array_fill(0, count($completedUnitIds), '?'));
+        $excludeClause = " AND u.id NOT IN ($placeholders)";
+        $params = array_merge($params, $completedUnitIds);
     }
 
     $stmt = $pdo->prepare("
@@ -140,14 +208,10 @@ function getAvailableUnitsForStudent(PDO $pdo, array $student): array
               SELECT unit_id FROM student_unit_registrations
               WHERE student_id = ? AND trimester = ? AND academic_year = ? AND status = 'registered'
           )
+          $excludeClause
         ORDER BY pu.year_of_study, u.unit_code
     ");
-    $stmt->execute([
-        (int) $student['program_id'],
-        (int) $student['id'],
-        $student['trimester'],
-        $student['academic_year'],
-    ]);
+    $stmt->execute($params);
 
     return $stmt->fetchAll();
 }
@@ -270,6 +334,13 @@ function reportNewSemester(PDO $pdo, array $student): array
     $pdo->beginTransaction();
 
     try {
+        completeStudentRegistrationsForTerm(
+            $pdo,
+            (int) $student['id'],
+            $student['trimester'],
+            $student['academic_year']
+        );
+
         $stmt = $pdo->prepare("
             UPDATE students
             SET trimester = ?, academic_year = ?, semester_number = ?
@@ -296,6 +367,15 @@ function reportNewSemester(PDO $pdo, array $student): array
             $fromSemester,
             $toSemester,
         ]);
+
+        ensureFeeStructureForTerm(
+            $pdo,
+            (int) ($student['program_id'] ?? 0),
+            $next['trimester'],
+            $next['academic_year'],
+            $student['trimester'],
+            $student['academic_year']
+        );
 
         $pdo->commit();
 
