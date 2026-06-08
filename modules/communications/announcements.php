@@ -1,10 +1,10 @@
 <?php
 $pageTitle = 'Announcements';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff', 'faculty', 'student']);
+requireModuleAccess('communications');
 
 $pdo = getDBConnection();
-$canPost = in_array($_SESSION['user_role'], ['super_admin', 'admin', 'staff'], true);
+$canPost = in_array($_SESSION['user_role'], ['super_admin', 'admin'], true);
 $canHomepage = canManageHomepage();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canPost) {
