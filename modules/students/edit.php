@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'Edit Student';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff']);
+requireRole(['super_admin', 'admin']);
 
 $pdo = getDBConnection();
 $id = $_GET['id'] ?? 0;
@@ -23,6 +23,9 @@ $loginStmt->execute([$id]);
 $studentLogin = $loginStmt->fetch();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $oldTrimester = $student['trimester'];
+    $oldYear = $student['academic_year'];
+
     $update = $pdo->prepare("UPDATE students SET
         first_name=?, last_name=?, middle_name=?, gender=?, date_of_birth=?,
         email=?, phone=?, address=?, national_id=?, program_id=?, campus_id=?,
@@ -41,6 +44,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         trim($_POST['kin_phone'] ?? ''), trim($_POST['kin_address'] ?? ''),
         $id
     ]);
+
+    if ($oldTrimester !== $_POST['trimester'] || $oldYear !== $_POST['academic_year']) {
+        completeStudentRegistrationsForTerm($pdo, (int) $id, $oldTrimester, $oldYear);
+        ensureFeeStructureForTerm(
+            $pdo,
+            (int) ($_POST['program_id'] ?: $student['program_id']),
+            $_POST['trimester'],
+            $_POST['academic_year'],
+            $oldTrimester,
+            $oldYear
+        );
+    }
 
     $message = 'Student updated successfully.';
     if (!empty($_POST['create_login']) && !$studentLogin) {
