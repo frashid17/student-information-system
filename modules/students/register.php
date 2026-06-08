@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'Student Registration';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff']);
+requireModuleAccess('students');
 
 $pdo = getDBConnection();
 $programs = $pdo->query("SELECT * FROM programs WHERE is_active = 1 ORDER BY program_name")->fetchAll();
