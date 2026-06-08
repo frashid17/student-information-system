@@ -11,6 +11,18 @@ if (!$student) {
     redirect(BASE_URL . '/dashboard.php');
 }
 
+$closedStale = closeStaleStudentRegistrations($pdo, $student);
+if ($closedStale > 0) {
+    setFlash('info', 'Previous semester unit registrations were closed. You can now register units for your current semester.');
+}
+
+ensureFeeStructureForTerm(
+    $pdo,
+    (int) ($student['program_id'] ?? 0),
+    $student['trimester'],
+    $student['academic_year']
+);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $unitIds = $_POST['unit_ids'] ?? [];
     $result = registerStudentUnits($pdo, $student, is_array($unitIds) ? $unitIds : []);
@@ -26,13 +38,15 @@ $availableUnits = getAvailableUnitsForStudent($pdo, $student);
 $remainingSlots = getRemainingUnitSlots($pdo, (int) $student['id'], $student['trimester'], $student['academic_year']);
 $atMaxUnits = count($registeredUnits) >= MAX_UNITS_PER_SEMESTER;
 $feeEligible = $paymentPercent >= UNIT_REGISTRATION_FEE_PERCENT;
+$completedUnitCount = count(getCompletedUnitIdsForStudent($pdo, (int) $student['id']));
+$needsSemesterReporting = $atMaxUnits && $feeEligible && (float) $feeBalance['balance'] <= 0;
 $flash = getFlash();
 
 require_once __DIR__ . '/../../includes/header.php';
 ?>
 
 <?php if ($flash): ?>
-    <div class="alert alert-<?= $flash['type'] === 'error' ? 'error' : 'success' ?>"><?= sanitize($flash['message']) ?></div>
+    <div class="alert alert-<?= $flash['type'] === 'error' ? 'error' : ($flash['type'] === 'info' ? 'info' : 'success') ?>"><?= sanitize($flash['message']) ?></div>
 <?php endif; ?>
 
 <div class="card" style="margin-bottom:24px;">
@@ -63,12 +77,26 @@ require_once __DIR__ . '/../../includes/header.php';
             <a href="<?= BASE_URL ?>/modules/fees/balance.php" class="btn btn-secondary btn-sm" style="margin-left:12px;">View Fee Balance</a>
             <?php else: ?>
             <a href="<?= BASE_URL ?>/modules/academics/exam_card.php" class="btn btn-secondary btn-sm" style="margin-left:12px;">View Exam Card</a>
+            <?php if ($needsSemesterReporting): ?>
+            <a href="<?= BASE_URL ?>/modules/academics/semester_reporting.php" class="btn btn-primary btn-sm" style="margin-left:12px;">Report for New Semester</a>
+            <?php endif; ?>
             <?php endif; ?>
         </div>
+        <?php if ($needsSemesterReporting): ?>
+        <div class="alert alert-info" style="margin-top:12px;margin-bottom:0;">
+            To register units in the <strong>next semester</strong>, first complete semester reporting after your results are awarded.
+            This closes your current unit registrations and opens a fresh registration period.
+        </div>
+        <?php endif; ?>
         <?php elseif (!$feeEligible): ?>
         <div class="alert alert-error" style="margin-top:16px;margin-bottom:0;">
             <?= sanitize($feeCheck['reason']) ?>
             <a href="<?= BASE_URL ?>/modules/fees/balance.php" class="btn btn-secondary btn-sm" style="margin-left:12px;">View Fee Balance</a>
+        </div>
+        <?php elseif ($completedUnitCount > 0 && count($registeredUnits) === 0): ?>
+        <div class="alert alert-info" style="margin-top:16px;margin-bottom:0;">
+            You are in a new semester with <?= $remainingSlots ?> unit slot(s) available.
+            <?= $completedUnitCount ?> unit(s) from previous semester(s) are already completed and will not be listed again.
         </div>
         <?php endif; ?>
     </div>
@@ -173,8 +201,15 @@ require_once __DIR__ . '/../../includes/header.php';
 </script>
 <?php elseif ($feeCheck['allowed'] && $remainingSlots <= 0): ?>
 <div class="alert alert-success">You have registered the maximum of <?= MAX_UNITS_PER_SEMESTER ?> units for this semester.</div>
+<?php elseif ($feeCheck['allowed'] && empty($availableUnits)): ?>
+<div class="alert alert-warning">
+    There are no more units available for registration in your program for this semester.
+    <?php if ($completedUnitCount > 0): ?>
+    You have already completed <?= $completedUnitCount ?> unit(s) from earlier semester(s).
+    <?php endif; ?>
+</div>
 <?php elseif ($feeCheck['allowed']): ?>
-<div class="alert alert-success">You have registered for all available units this semester.</div>
+<div class="alert alert-warning">No units are available for registration right now. Contact the administration office.</div>
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
