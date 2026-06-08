@@ -39,6 +39,13 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                     <span class="nav-icon">V</span> View Students
                 </a>
             </div>
+            <?php elseif (canAccess('students_scoped')): ?>
+            <div class="nav-section">
+                <div class="nav-section-title">My Classes</div>
+                <a href="<?= BASE_URL ?>/modules/students/my_students.php" class="nav-link <?= $currentPage === 'my_students' ? 'active' : '' ?>">
+                    <span class="nav-icon">S</span> My Students
+                </a>
+            </div>
             <?php endif; ?>
 
             <?php if (canAccess('fees_manage')): ?>
@@ -60,7 +67,14 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
             </div>
             <?php endif; ?>
 
-            <?php if (canAccess('faculty')): ?>
+            <?php if (canAccess('payslip_own')): ?>
+            <div class="nav-section">
+                <div class="nav-section-title">Payroll</div>
+                <a href="<?= BASE_URL ?>/modules/faculty/my_payslip.php" class="nav-link <?= $currentPage === 'my_payslip' ? 'active' : '' ?>">
+                    <span class="nav-icon">L</span> My Pay Slip
+                </a>
+            </div>
+            <?php elseif (canAccess('faculty')): ?>
             <div class="nav-section">
                 <div class="nav-section-title">Faculty</div>
                 <a href="<?= BASE_URL ?>/modules/faculty/register.php" class="nav-link <?= $currentPage === 'register' && strpos($_SERVER['PHP_SELF'], 'faculty') !== false ? 'active' : '' ?>">
@@ -107,6 +121,19 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                     <span class="nav-icon">T</span> Attendance
                 </a>
             </div>
+            <?php elseif (canAccess('academics_teaching')): ?>
+            <div class="nav-section">
+                <div class="nav-section-title">Teaching</div>
+                <a href="<?= BASE_URL ?>/modules/academics/grades.php" class="nav-link <?= $currentPage === 'grades' ? 'active' : '' ?>">
+                    <span class="nav-icon">G</span> Record Grades
+                </a>
+                <a href="<?= BASE_URL ?>/modules/academics/attendance.php" class="nav-link <?= $currentPage === 'attendance' ? 'active' : '' ?>">
+                    <span class="nav-icon">T</span> Attendance
+                </a>
+                <a href="<?= BASE_URL ?>/modules/academics/timetable.php" class="nav-link <?= $currentPage === 'timetable' ? 'active' : '' ?>">
+                    <span class="nav-icon">M</span> Timetable
+                </a>
+            </div>
             <?php elseif (canAccess('academics_view')): ?>
             <div class="nav-section">
                 <div class="nav-section-title">Academics</div>
@@ -139,6 +166,9 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                 </a>
                 <a href="<?= BASE_URL ?>/modules/institution/fees.php" class="nav-link <?= $currentPage === 'fees' && strpos($_SERVER['PHP_SELF'], 'institution') !== false ? 'active' : '' ?>">
                     <span class="nav-icon">E</span> Fee Setup
+                </a>
+                <a href="<?= BASE_URL ?>/modules/institution/unit_assignments.php" class="nav-link <?= $currentPage === 'unit_assignments' ? 'active' : '' ?>">
+                    <span class="nav-icon">A</span> Unit Assignments
                 </a>
             </div>
             <?php endif; ?>
