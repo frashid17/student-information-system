@@ -146,3 +146,7 @@ student-managment-system/
 ## License
 
 Academic project - Kenya Methodist University, Diploma in Business Information Technology.
+
+logins
+superadmin - admin // admin1
+student - stu20260001 // anisa123
