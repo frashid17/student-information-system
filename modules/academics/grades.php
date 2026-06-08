@@ -1,15 +1,31 @@
 <?php
 $pageTitle = 'Grades / Results';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff', 'faculty', 'student']);
+requireAnyModuleAccess(['academics', 'academics_teaching', 'academics_view']);
 
 $pdo = getDBConnection();
 $linkedStudent = getLinkedStudent($pdo);
-$canRecordGrades = canAccess('academics');
+$canRecordGrades = canAccess('academics') || canAccess('academics_teaching');
 $students = $pdo->query("
     SELECT id, student_number, first_name, last_name, trimester, academic_year
     FROM students WHERE status = 'active' ORDER BY first_name
 ")->fetchAll();
+
+if (isTeachingUser() && !isAdminRole()) {
+    $facultyId = getTeachingFacultyId($pdo);
+    if ($facultyId) {
+        $term = getCurrentTeachingTerm($pdo, $facultyId);
+        $students = getStudentsForTeacherUnits($pdo, $facultyId, $term['trimester'], $term['academic_year']);
+        foreach ($students as &$s) {
+            $s['trimester'] = $term['trimester'];
+            $s['academic_year'] = $term['academic_year'];
+        }
+        unset($s);
+    } else {
+        $students = [];
+    }
+}
+
 $recordStudentId = isset($_GET['record']) && is_numeric($_GET['record']) ? (int) $_GET['record'] : null;
 
 if ($canRecordGrades && isset($_GET['ajax']) && $_GET['ajax'] === 'student_units') {
@@ -27,7 +43,21 @@ if ($canRecordGrades && isset($_GET['ajax']) && $_GET['ajax'] === 'student_units
 
     $trimester = $_GET['trimester'] ?? $student['trimester'];
     $academicYear = $_GET['academic_year'] ?? $student['academic_year'];
+
+    if (isTeachingUser() && !isAdminRole()) {
+        $facultyId = getTeachingFacultyId($pdo);
+        if (!$facultyId || !teacherCanAccessStudent($pdo, $facultyId, $studentId, $trimester, $academicYear)) {
+            echo json_encode(['ok' => false, 'error' => 'You can only record grades for students in your assigned units.']);
+            exit;
+        }
+    }
+
     $units = getStudentUnitsWithGrades($pdo, $studentId, $trimester, $academicYear);
+
+    if (isTeachingUser() && !isAdminRole()) {
+        $assignedIds = getAssignedUnitIdsForTeacher($pdo, $facultyId, $trimester, $academicYear);
+        $units = array_values(array_filter($units, fn($u) => in_array((int) $u['unit_id'], $assignedIds, true)));
+    }
 
     echo json_encode([
         'ok' => true,
@@ -53,6 +83,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $redirectUrl = BASE_URL . '/modules/academics/grades.php' . ($studentId ? '?record=' . $studentId : '');
 
     if (($_POST['action'] ?? '') === 'save_unit_grade') {
+        if (isTeachingUser() && !isAdminRole()) {
+            $facultyId = getTeachingFacultyId($pdo);
+            $unitId = (int) ($_POST['unit_id'] ?? 0);
+            $trimester = $_POST['trimester'] ?? '';
+            $academicYear = $_POST['academic_year'] ?? '';
+            if (
+                !$facultyId
+                || !teacherCanAccessStudent($pdo, $facultyId, $studentId, $trimester, $academicYear)
+                || !teacherCanAccessUnit($pdo, $facultyId, $unitId, $trimester, $academicYear)
+            ) {
+                setFlash('error', 'You can only grade students and units assigned to you.');
+                redirect($redirectUrl);
+            }
+        }
+
         $result = saveStudentUnitGrade(
             $pdo,
             $studentId,
