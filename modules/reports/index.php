@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'Reports';
-require_once __DIR__ . '/../../includes/header.php';
-requireRole(['super_admin', 'admin', 'staff']);
+require_once __DIR__ . '/../../includes/init.php';
+requireModuleAccess('reports');
 
 $pdo = getDBConnection();
 $reportType = $_GET['type'] ?? 'enrollment';
@@ -36,6 +36,8 @@ $allStudents = $pdo->query("
     WHERE s.status = 'active'
     ORDER BY s.student_number
 ")->fetchAll();
+
+require_once __DIR__ . '/../../includes/header.php';
 ?>
 
 <div class="tabs">
