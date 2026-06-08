@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'Issue / Return Books';
 require_once __DIR__ . '/../../includes/init.php';
-requireRole(['super_admin', 'admin', 'staff', 'faculty', 'student']);
+requireAnyModuleAccess(['library', 'library_student']);
 
 $pdo = getDBConnection();
 $linkedStudent = getLinkedStudent($pdo);
