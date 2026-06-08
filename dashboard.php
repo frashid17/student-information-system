@@ -20,6 +20,11 @@ $recentStudents = [];
 $gradesRecorded = 0;
 $attendanceRecorded = 0;
 $libraryToday = 0;
+$staffAssignedUnits = 0;
+$staffStudentCount = 0;
+$staffTimetableCount = 0;
+$staffPayslipCount = 0;
+$staffUnitList = [];
 
 if ($role === 'student') {
     $linkedStudent = getLinkedStudent($pdo);
@@ -49,10 +54,26 @@ if ($role === 'student') {
     }
 } elseif ($role === 'faculty') {
     $linkedFaculty = getLinkedFaculty($pdo);
-    $stats['students'] = (int) $pdo->query("SELECT COUNT(*) FROM students WHERE status = 'active'")->fetchColumn();
-    $gradesRecorded = (int) $pdo->query("SELECT COUNT(*) FROM grades")->fetchColumn();
-    $attendanceRecorded = (int) $pdo->query("SELECT COUNT(*) FROM attendance")->fetchColumn();
-    $libraryToday = (int) $pdo->query("SELECT COUNT(*) FROM library_checkins WHERE DATE(checkin_time) = CURDATE()")->fetchColumn();
+    if ($linkedFaculty) {
+        $facultyId = (int) $linkedFaculty['id'];
+        $term = getCurrentTeachingTerm($pdo, $facultyId);
+        $staffUnitList = getAssignedUnitsForTeacher($pdo, $facultyId, $term['trimester'], $term['academic_year']);
+        $staffAssignedUnits = count($staffUnitList);
+        $staffStudentCount = count(getStudentsForTeacherUnits($pdo, $facultyId, $term['trimester'], $term['academic_year']));
+        $staffTimetableCount = count(getTeacherTimetable($pdo, $facultyId, $term['trimester'], $term['academic_year']));
+        $staffPayslipCount = count(getTeacherPayslips($pdo, $facultyId));
+    }
+} elseif ($role === 'staff') {
+    $linkedFaculty = getLinkedFaculty($pdo);
+    if ($linkedFaculty) {
+        $facultyId = (int) $linkedFaculty['id'];
+        $term = getCurrentTeachingTerm($pdo, $facultyId);
+        $staffUnitList = getAssignedUnitsForTeacher($pdo, $facultyId, $term['trimester'], $term['academic_year']);
+        $staffAssignedUnits = count($staffUnitList);
+        $staffStudentCount = count(getStudentsForTeacherUnits($pdo, $facultyId, $term['trimester'], $term['academic_year']));
+        $staffTimetableCount = count(getTeacherTimetable($pdo, $facultyId, $term['trimester'], $term['academic_year']));
+        $staffPayslipCount = count(getTeacherPayslips($pdo, $facultyId));
+    }
 } else {
     $stats = [
         'students' => $pdo->query("SELECT COUNT(*) FROM students WHERE status = 'active'")->fetchColumn(),
@@ -83,6 +104,8 @@ require_once __DIR__ . '/includes/header.php';
 <?php
 if ($role === 'student') {
     require __DIR__ . '/includes/dashboards/student.php';
+} elseif ($role === 'staff') {
+    require __DIR__ . '/includes/dashboards/staff.php';
 } elseif ($role === 'faculty') {
     require __DIR__ . '/includes/dashboards/faculty.php';
 } else {
