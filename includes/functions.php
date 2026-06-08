@@ -49,27 +49,121 @@ function generateReceiptNumber(PDO $pdo): string
     return 'RCP' . date('Ymd') . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
 }
 
+function getFeeStructureForTerm(PDO $pdo, ?int $programId, string $trimester, string $academicYear): ?array
+{
+    if (!$programId) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT id, amount, description, trimester, academic_year
+        FROM fee_structures
+        WHERE program_id = ? AND trimester = ? AND academic_year = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$programId, $trimester, $academicYear]);
+
+    $row = $stmt->fetch();
+
+    return $row ?: null;
+}
+
+function ensureFeeStructureForTerm(
+    PDO $pdo,
+    ?int $programId,
+    string $trimester,
+    string $academicYear,
+    ?string $sourceTrimester = null,
+    ?string $sourceYear = null
+): bool {
+    if (!$programId) {
+        return false;
+    }
+
+    if (getFeeStructureForTerm($pdo, $programId, $trimester, $academicYear)) {
+        return true;
+    }
+
+    $source = null;
+    if ($sourceTrimester && $sourceYear) {
+        $source = getFeeStructureForTerm($pdo, $programId, $sourceTrimester, $sourceYear);
+    }
+
+    if (!$source) {
+        $stmt = $pdo->prepare("
+            SELECT amount, description FROM fee_structures
+            WHERE program_id = ?
+            ORDER BY academic_year DESC, id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$programId]);
+        $source = $stmt->fetch();
+    }
+
+    if (!$source) {
+        return false;
+    }
+
+    $insert = $pdo->prepare("
+        INSERT INTO fee_structures (program_id, trimester, academic_year, amount, description)
+        VALUES (?, ?, ?, ?, ?)
+    ");
+    $insert->execute([
+        $programId,
+        $trimester,
+        $academicYear,
+        $source['amount'],
+        $source['description'] ?? 'Semester fees',
+    ]);
+
+    return true;
+}
+
+function getStudentFeePayments(PDO $pdo, int $studentId, string $trimester, string $academicYear): array
+{
+    $stmt = $pdo->prepare("
+        SELECT fp.*
+        FROM fee_payments fp
+        WHERE fp.student_id = ? AND fp.trimester = ? AND fp.academic_year = ?
+        ORDER BY fp.payment_date DESC, fp.created_at DESC
+    ");
+    $stmt->execute([$studentId, $trimester, $academicYear]);
+
+    return $stmt->fetchAll();
+}
+
 function getStudentFeeBalance(PDO $pdo, int $studentId, string $trimester, string $academicYear): array
 {
     $stmt = $pdo->prepare("
-        SELECT s.*, fs.amount as fee_amount
+        SELECT s.*, p.program_name
         FROM students s
-        LEFT JOIN fee_structures fs ON fs.program_id = s.program_id 
-            AND fs.trimester = ? AND fs.academic_year = ?
+        LEFT JOIN programs p ON p.id = s.program_id
         WHERE s.id = ?
     ");
-    $stmt->execute([$trimester, $academicYear, $studentId]);
+    $stmt->execute([$studentId]);
     $student = $stmt->fetch();
 
     if (!$student) {
-        return ['total_fee' => 0, 'total_paid' => 0, 'balance' => 0];
+        return [
+            'total_fee' => 0,
+            'total_paid' => 0,
+            'balance' => 0,
+            'fee_configured' => false,
+            'student' => null,
+        ];
     }
 
-    $totalFee = (float) ($student['fee_amount'] ?? 0);
+    $feeStructure = getFeeStructureForTerm(
+        $pdo,
+        (int) ($student['program_id'] ?? 0),
+        $trimester,
+        $academicYear
+    );
+    $totalFee = $feeStructure ? (float) $feeStructure['amount'] : 0.0;
 
     $payStmt = $pdo->prepare("
-        SELECT COALESCE(SUM(amount), 0) as total_paid 
-        FROM fee_payments 
+        SELECT COALESCE(SUM(amount), 0) as total_paid
+        FROM fee_payments
         WHERE student_id = ? AND trimester = ? AND academic_year = ?
     ");
     $payStmt->execute([$studentId, $trimester, $academicYear]);
@@ -79,7 +173,9 @@ function getStudentFeeBalance(PDO $pdo, int $studentId, string $trimester, strin
         'total_fee' => $totalFee,
         'total_paid' => $totalPaid,
         'balance' => $totalFee - $totalPaid,
-        'student' => $student
+        'fee_configured' => $feeStructure !== null && $totalFee > 0,
+        'fee_structure' => $feeStructure,
+        'student' => $student,
     ];
 }
 
@@ -155,7 +251,8 @@ function getLinkedStudent(PDO $pdo): ?array
 
 function getLinkedFaculty(PDO $pdo): ?array
 {
-    if (!isFacultyUser() || empty($_SESSION['related_id'])) {
+    $role = $_SESSION['user_role'] ?? '';
+    if (!in_array($role, ['faculty', 'staff'], true) || empty($_SESSION['related_id'])) {
         return null;
     }
 
